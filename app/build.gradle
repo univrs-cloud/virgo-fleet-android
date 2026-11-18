@@ -1,0 +1,40 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace = 'cloud.univrs.fleet'
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 2
+        }
+    }
+
+    defaultConfig {
+        applicationId = 'cloud.univrs.fleet'
+        minSdk = 24
+        targetSdk = 37
+        versionCode = 1
+        versionName = '1.0.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = true
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.8.0'
+    implementation 'androidx.biometric:biometric:1.1.0'
+    implementation 'androidx.webkit:webkit:1.18.0'
+}
+
+androidComponents {
+    onVariants(selector().withBuildType('release'), { variant ->
+        variant.outputs.each { output ->
+            output.outputFileName.set('univrs-fleet.apk')
+        }
+    } as Action)
+}

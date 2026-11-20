@@ -14,6 +14,7 @@ import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 import androidx.webkit.JavaScriptReplyProxy;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -26,6 +27,7 @@ import java.security.KeyPairGenerator;
 import java.security.KeyStore;
 import java.security.PrivateKey;
 import java.security.Signature;
+import java.security.cert.Certificate;
 import java.security.spec.ECGenParameterSpec;
 import java.util.UUID;
 
@@ -116,11 +118,19 @@ final class BiometricBridge {
 		String alias = alias(credentialId);
 		KeyPair keyPair;
 		Signature signature;
+		JSONArray certificates = new JSONArray();
 		try {
-			keyPair = createKey(alias);
+			keyPair = createKey(alias, challenge);
 			signature = Signature.getInstance(SIGNATURE_ALGORITHM);
 			signature.initSign(keyPair.getPrivate());
-		} catch (GeneralSecurityException error) {
+			Certificate[] chain = keyStore().getCertificateChain(alias);
+			if (chain == null || chain.length < 2) {
+				throw new GeneralSecurityException("This phone cannot attest its keys.");
+			}
+			for (Certificate certificate : chain) {
+				certificates.put(encode(certificate.getEncoded()));
+			}
+		} catch (GeneralSecurityException | IOException error) {
 			deleteKey(alias);
 			reply(replyProxy, id, failed("Could not set up biometric sign-in on this phone."));
 			return;
@@ -140,6 +150,7 @@ final class BiometricBridge {
 				put(body, "credentialId", credentialId);
 				put(body, "publicKey", publicKey);
 				put(body, "signature", signed);
+				put(body, "certificates", certificates);
 				reply(replyProxy, id, body);
 			}
 
@@ -252,12 +263,13 @@ final class BiometricBridge {
 		biometricPrompt.authenticate(promptInfo, new BiometricPrompt.CryptoObject(signature));
 	}
 
-	private static KeyPair createKey(String alias) throws GeneralSecurityException {
+	private static KeyPair createKey(String alias, String challenge) throws GeneralSecurityException {
 		KeyGenParameterSpec.Builder builder = new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
 			.setAlgorithmParameterSpec(new ECGenParameterSpec("secp256r1"))
 			.setDigests(KeyProperties.DIGEST_SHA256)
 			.setUserAuthenticationRequired(true)
-			.setInvalidatedByBiometricEnrollment(true);
+			.setInvalidatedByBiometricEnrollment(true)
+			.setAttestationChallenge(challenge.getBytes(StandardCharsets.UTF_8));
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
 			builder.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG);
 		}

@@ -20,6 +20,7 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
@@ -44,8 +45,11 @@ public class MainActivity extends AppCompatActivity {
 		insetsController.setAppearanceLightNavigationBars(!isNight);
 
 		FrameLayout container = new FrameLayout(this);
+		SwipeRefreshLayout swipeRefresh = new SwipeRefreshLayout(this);
 		webView = new WebView(this);
-		container.addView(webView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+		swipeRefresh.addView(webView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+		swipeRefresh.setOnRefreshListener(() -> webView.reload());
+		container.addView(swipeRefresh, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 		setContentView(container);
 		ViewCompat.setOnApplyWindowInsetsListener(container, (view, insets) -> {
 			Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.ime());
@@ -66,6 +70,11 @@ public class MainActivity extends AppCompatActivity {
 				}
 				openExternally(url);
 				return true;
+			}
+
+			@Override
+			public void onPageFinished(WebView view, String url) {
+				swipeRefresh.setRefreshing(false);
 			}
 		});
 

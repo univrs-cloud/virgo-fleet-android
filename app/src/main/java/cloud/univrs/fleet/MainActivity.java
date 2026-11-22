@@ -1,10 +1,12 @@
 package cloud.univrs.fleet;
 
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.MotionEvent;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.WebResourceRequest;
@@ -31,6 +33,25 @@ public class MainActivity extends AppCompatActivity {
 	private static final String HOST = "fleet.univrs.cloud";
 	private static final String ORIGIN = "https://" + HOST;
 	private static final String BRIDGE_NAME = "univrsFleet";
+	private static final String SCROLL_BRIDGE_NAME = "univrsFleetScroll";
+	private static final String SCROLL_MESSAGE_PULL = "pull";
+	private static final String SCROLL_SCRIPT = "(() => {"
+		+ "if (window !== window.top) return;"
+		+ "let path = [];"
+		+ "let canPull = false;"
+		+ "const isScrolled = () => path.some((node) => node instanceof Element && node.scrollTop > 0);"
+		+ "addEventListener('touchstart', (event) => {"
+		+ "path = event.composedPath();"
+		+ "canPull = event.touches.length === 1 && !isScrolled();"
+		+ "univrsFleetScroll.postMessage(canPull ? 'pull' : 'scroll');"
+		+ "}, { capture: true, passive: true });"
+		+ "addEventListener('touchmove', () => {"
+		+ "if (canPull && isScrolled()) {"
+		+ "canPull = false;"
+		+ "univrsFleetScroll.postMessage('scroll');"
+		+ "}"
+		+ "}, { capture: true, passive: true });"
+		+ "})();";
 
 	private WebView webView;
 	private BiometricBridge biometricBridge;
@@ -45,7 +66,7 @@ public class MainActivity extends AppCompatActivity {
 		insetsController.setAppearanceLightNavigationBars(!isNight);
 
 		FrameLayout container = new FrameLayout(this);
-		SwipeRefreshLayout swipeRefresh = new SwipeRefreshLayout(this);
+		PullRefreshLayout swipeRefresh = new PullRefreshLayout(this);
 		webView = new WebView(this);
 		swipeRefresh.addView(webView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 		swipeRefresh.setOnRefreshListener(() -> webView.reload());
@@ -85,6 +106,17 @@ public class MainActivity extends AppCompatActivity {
 					biometricBridge.handle(message.getData(), replyProxy);
 				}
 			});
+		}
+
+		if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+			WebViewCompat.addWebMessageListener(webView, SCROLL_BRIDGE_NAME, Collections.singleton(ORIGIN), (view, message, sourceOrigin, isMainFrame, replyProxy) -> {
+				if (isMainFrame) {
+					swipeRefresh.setCanPull(SCROLL_MESSAGE_PULL.equals(message.getData()));
+				}
+			});
+			WebViewCompat.addDocumentStartJavaScript(webView, SCROLL_SCRIPT, Collections.singleton(ORIGIN));
+		} else {
+			swipeRefresh.setEnabled(false);
 		}
 
 		getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
@@ -152,6 +184,30 @@ public class MainActivity extends AppCompatActivity {
 		try {
 			startActivity(new Intent(Intent.ACTION_VIEW, url));
 		} catch (ActivityNotFoundException error) {
+		}
+	}
+
+	private static final class PullRefreshLayout extends SwipeRefreshLayout {
+		private boolean canPull;
+
+		PullRefreshLayout(Context context) {
+			super(context);
+		}
+
+		void setCanPull(boolean canPull) {
+			this.canPull = canPull;
+		}
+
+		@Override
+		public boolean onInterceptTouchEvent(MotionEvent event) {
+			int action = event.getActionMasked();
+			if (action == MotionEvent.ACTION_DOWN) {
+				canPull = false;
+			}
+			if (action == MotionEvent.ACTION_MOVE && !canPull) {
+				return false;
+			}
+			return super.onInterceptTouchEvent(event);
 		}
 	}
 }

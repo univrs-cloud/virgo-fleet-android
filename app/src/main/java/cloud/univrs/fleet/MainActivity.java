@@ -4,9 +4,12 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.WebResourceRequest;
@@ -17,6 +20,7 @@ import android.widget.FrameLayout;
 
 import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.graphics.ColorUtils;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -25,6 +29,10 @@ import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.Collections;
 import java.util.Locale;
@@ -52,6 +60,77 @@ public class MainActivity extends AppCompatActivity {
 		+ "}"
 		+ "}, { capture: true, passive: true });"
 		+ "})();";
+	private static final String BARS_BRIDGE_NAME = "univrsFleetBars";
+	private static final String BARS_SCRIPT = "(() => {"
+		+ "if (window !== window.top) return;"
+		+ "const canvas = document.createElement('canvas');"
+		+ "canvas.width = 1;"
+		+ "canvas.height = 1;"
+		+ "const context = canvas.getContext('2d', { willReadFrequently: true });"
+		+ "let last = '';"
+		+ "let isQueued = false;"
+		+ "let retries = 0;"
+		+ "let lastElement = null;"
+		+ "const parentOf = (node) => node.parentElement || node.getRootNode().host || null;"
+		+ "const chainOf = (element) => {"
+		+ "const chain = [];"
+		+ "for (let node = element; node; node = parentOf(node)) chain.unshift(node);"
+		+ "return chain;"
+		+ "};"
+		+ "const colorOf = (elements) => {"
+		+ "context.fillStyle = '#fff';"
+		+ "context.fillRect(0, 0, 1, 1);"
+		+ "for (const element of elements) {"
+		+ "context.fillStyle = 'transparent';"
+		+ "context.fillStyle = getComputedStyle(element).backgroundColor;"
+		+ "context.fillRect(0, 0, 1, 1);"
+		+ "}"
+		+ "const [r, g, b] = context.getImageData(0, 0, 1, 1).data;"
+		+ "return [r, g, b];"
+		+ "};"
+		+ "const elementAt = (x, y) => {"
+		+ "let element = document.elementFromPoint(x, y);"
+		+ "while (element?.shadowRoot) {"
+		+ "const inner = element.shadowRoot.elementFromPoint(x, y);"
+		+ "if (!inner || inner === element) break;"
+		+ "element = inner;"
+		+ "}"
+		+ "return element || document.body;"
+		+ "};"
+		+ "const sample = () => {"
+		+ "isQueued = false;"
+		+ "if (!document.body) return;"
+		+ "let element = elementAt(innerWidth / 2, innerHeight - 1);"
+		+ "if (element === document.documentElement && lastElement?.isConnected) {"
+		+ "element = lastElement;"
+		+ "}"
+		+ "if (element === document.documentElement && retries < 60) {"
+		+ "retries += 1;"
+		+ "queue();"
+		+ "return;"
+		+ "}"
+		+ "retries = 0;"
+		+ "lastElement = element;"
+		+ "const top = colorOf(chainOf(document.body));"
+		+ "const bottom = colorOf(chainOf(element));"
+		+ "const key = top.join() + '|' + bottom.join();"
+		+ "if (key === last) return;"
+		+ "last = key;"
+		+ "univrsFleetBars.postMessage(JSON.stringify({ top, bottom }));"
+		+ "};"
+		+ "const queue = () => {"
+		+ "if (isQueued) return;"
+		+ "isQueued = true;"
+		+ "requestAnimationFrame(sample);"
+		+ "};"
+		+ "new MutationObserver(queue).observe(document.documentElement, { attributes: true, childList: true, subtree: true });"
+		+ "addEventListener('DOMContentLoaded', queue);"
+		+ "addEventListener('load', queue);"
+		+ "addEventListener('resize', queue);"
+		+ "addEventListener('scroll', queue, { capture: true, passive: true });"
+		+ "addEventListener('transitionend', queue, { capture: true });"
+		+ "matchMedia('(prefers-color-scheme: dark)').addEventListener('change', queue);"
+		+ "})();";
 
 	private WebView webView;
 	private BiometricBridge biometricBridge;
@@ -66,15 +145,22 @@ public class MainActivity extends AppCompatActivity {
 		insetsController.setAppearanceLightNavigationBars(!isNight);
 
 		FrameLayout container = new FrameLayout(this);
+		View bottomBar = new View(this);
 		PullRefreshLayout swipeRefresh = new PullRefreshLayout(this);
 		webView = new WebView(this);
 		swipeRefresh.addView(webView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 		swipeRefresh.setOnRefreshListener(() -> webView.reload());
 		container.addView(swipeRefresh, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+		container.addView(bottomBar, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, Gravity.BOTTOM));
 		setContentView(container);
 		ViewCompat.setOnApplyWindowInsetsListener(container, (view, insets) -> {
 			Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.ime());
-			view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+			FrameLayout.LayoutParams content = (FrameLayout.LayoutParams) swipeRefresh.getLayoutParams();
+			content.setMargins(bars.left, bars.top, bars.right, bars.bottom);
+			swipeRefresh.setLayoutParams(content);
+			FrameLayout.LayoutParams bottom = (FrameLayout.LayoutParams) bottomBar.getLayoutParams();
+			bottom.height = bars.bottom;
+			bottomBar.setLayoutParams(bottom);
 			return WindowInsetsCompat.CONSUMED;
 		});
 
@@ -115,6 +201,12 @@ public class MainActivity extends AppCompatActivity {
 				}
 			});
 			WebViewCompat.addDocumentStartJavaScript(webView, SCROLL_SCRIPT, Collections.singleton(ORIGIN));
+			WebViewCompat.addWebMessageListener(webView, BARS_BRIDGE_NAME, Collections.singleton(ORIGIN), (view, message, sourceOrigin, isMainFrame, replyProxy) -> {
+				if (isMainFrame) {
+					applyBars(message.getData(), container, bottomBar, insetsController);
+				}
+			});
+			WebViewCompat.addDocumentStartJavaScript(webView, BARS_SCRIPT, Collections.singleton(ORIGIN));
 		} else {
 			swipeRefresh.setEnabled(false);
 		}
@@ -162,6 +254,30 @@ public class MainActivity extends AppCompatActivity {
 	protected void onDestroy() {
 		webView.destroy();
 		super.onDestroy();
+	}
+
+	private static void applyBars(String data, View top, View bottom, WindowInsetsControllerCompat insetsController) {
+		if (data == null) {
+			return;
+		}
+		try {
+			JSONObject colors = new JSONObject(data);
+			int topColor = colorOf(colors.getJSONArray("top"));
+			int bottomColor = colorOf(colors.getJSONArray("bottom"));
+			top.setBackgroundColor(topColor);
+			bottom.setBackgroundColor(bottomColor);
+			insetsController.setAppearanceLightStatusBars(isLight(topColor));
+			insetsController.setAppearanceLightNavigationBars(isLight(bottomColor));
+		} catch (JSONException error) {
+		}
+	}
+
+	private static int colorOf(JSONArray rgb) throws JSONException {
+		return Color.rgb(rgb.getInt(0), rgb.getInt(1), rgb.getInt(2));
+	}
+
+	private static boolean isLight(int color) {
+		return ColorUtils.calculateLuminance(color) > 0.5;
 	}
 
 	private static boolean isFleet(Uri url) {
